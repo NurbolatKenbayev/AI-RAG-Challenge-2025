@@ -1,17 +1,33 @@
+import os
+import sys
+
+import warnings
+warnings.filterwarnings("ignore")
+
 import asyncio
 import uuid
-
-from docs_parser import custom_tokenizer, chunker, apply_chunking
-from nlp_tools import get_embeddings
 
 import weaviate
 from weaviate.classes.init import Auth
 from weaviate.classes.config import Property, DataType, Configure
 
-import warnings
-warnings.filterwarnings("ignore")
 
-import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.docs_parser import custom_tokenizer, chunker, apply_chunking
+from utils.nlp_tools import get_embeddings
+
+
+import logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+stream_handler = logging.StreamHandler(sys.stdout)
+log_formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+stream_handler.setFormatter(log_formatter)
+logger.addHandler(stream_handler)
+
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,18 +40,6 @@ WEAVIATE_HTTP_PORT = os.getenv("WEAVIATE_HTTP_PORT", "8080")
 WEAVIATE_GRPC_HOST = os.getenv("WEAVIATE_GRPC_HOST", "localhost")
 WEAVIATE_GRPC_PORT = os.getenv("WEAVIATE_GRPC_PORT", "50051")
 WEAVIATE_AUTH_KEY = os.getenv("WEAVIATE_AUTH_KEY", None)
-
-
-import sys
-import logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-stream_handler = logging.StreamHandler(sys.stdout)
-log_formatter = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-stream_handler.setFormatter(log_formatter)
-logger.addHandler(stream_handler)
 
 
 weaviate_client = weaviate.connect_to_custom(
@@ -169,10 +173,10 @@ def get_files_from_dir(dir_path: str):
 if __name__ == "__main__":
     # Pass your list of PDF file paths here
     document_path_list = [
-        os.path.expanduser("~/Desktop/work_dir/689af43b20634866094170/Dataset/AsiaAgroFood/aafdf5_2024_cons_rus.pdf"),
+        os.path.expanduser("~/Desktop/work_dir/68a58892b4058539485342/Dataset/AsiaAgroFood/aafdf5_2024_cons_rus.pdf"),
     ]
     
-    # dir_path = os.path.expanduser("~/Desktop/work_dir/AI-RAG-Challenge-2025/689af43b20634866094170/Dataset") TODO: process all dirs
+    # dir_path = os.path.expanduser("~/Desktop/work_dir/AI-RAG-Challenge-2025/68a58892b4058539485342/Dataset") TODO: process all dirs
     # pdf_files = get_files_from_dir(dir_path=dir_path)
 
     asyncio.run(main(document_path_list))

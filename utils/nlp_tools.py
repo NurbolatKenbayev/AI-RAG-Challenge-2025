@@ -1,7 +1,9 @@
 import os
+import sys
+
 from sentence_transformers import SentenceTransformer
 
-import sys
+
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

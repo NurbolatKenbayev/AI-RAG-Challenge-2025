@@ -1,3 +1,9 @@
+import os
+import sys
+
+import warnings
+warnings.filterwarnings("ignore")
+
 from docling.document_converter import DocumentConverter
 
 from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
@@ -23,8 +29,6 @@ import json
 from contextlib import redirect_stdout
 
 
-
-import sys
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -36,7 +40,6 @@ stream_handler.setFormatter(log_formatter)
 logger.addHandler(stream_handler)
 
 
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
