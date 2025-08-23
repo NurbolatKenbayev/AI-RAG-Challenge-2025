@@ -95,7 +95,7 @@ class PytesseractOCRModule:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
 
         # Enforce Russian OCR by default; ignore environment overrides
-        self.language = language or "rus"
+        self.language = language or "rus+eng+kaz"
         try:
             self.dpi = int(dpi or os.getenv("PYTESS_DPI", "300"))
         except Exception:

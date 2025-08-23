@@ -6,6 +6,7 @@ warnings.filterwarnings("ignore")
 
 import asyncio
 import uuid
+import glob
 
 import weaviate
 from weaviate.classes.init import Auth
@@ -14,6 +15,8 @@ from weaviate.classes.config import Property, DataType, Configure
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.docs_parser import custom_tokenizer, chunker, apply_chunking
+from ocr.apply_chunking_custom_ocr import apply_chunking_custom_ocr
+from ocr.registry import get_ocr_module
 from utils.nlp_tools import get_embeddings
 
 
@@ -95,11 +98,21 @@ async def process_document(document_path: str, weaviate_client: weaviate.client.
     ### Step 1: File parsing and chunking
     logger.info(f"Applying chunking to: {document_path}")
     document_dir = os.path.dirname(document_path)
-    chunks = apply_chunking(
+    # chunks = apply_chunking(
+    #     pdf_path=document_path,
+    #     save_doc_dir=os.path.join(document_dir, "docling", "doc"),
+    #     print_titles=False, 
+    #     save_chunks_dir=os.path.join(document_dir, "docling", "chunks")
+    # )
+    chunks = apply_chunking_custom_ocr(
         pdf_path=document_path,
+        ocr_module=get_ocr_module("pytesseract"),  # or None to skip OCR
+        pre_hooks=None,
+        doc_hook=None,
+        chunks_hook=None,
         save_doc_dir=os.path.join(document_dir, "docling", "doc"),
-        print_titles=False, 
-        save_chunks_dir=os.path.join(document_dir, "docling", "chunks")
+        print_titles=False,
+        save_chunks_dir=os.path.join(document_dir, "docling", "chunks"),
     )
     
     ### Step 2: Embedding and Indexing
@@ -107,7 +120,8 @@ async def process_document(document_path: str, weaviate_client: weaviate.client.
     
     # Get Weaviate collection
     weaviate_collection = weaviate_client.collections.get(collection_name)
-    
+    initial_count = weaviate_collection.aggregate.over_all(total_count=True).total_count
+
     # Using batch.fixed_size for controlled batch processing
     with weaviate_collection.batch.fixed_size(batch_size=100) as batch:
         for idx, chunk in enumerate(chunks):
@@ -138,10 +152,12 @@ async def process_document(document_path: str, weaviate_client: weaviate.client.
                 vector=chunk_embedding
             )
     
-    if weaviate_collection.aggregate.over_all(total_count=True).total_count == len(chunks):
+    if weaviate_collection.aggregate.over_all(total_count=True).total_count - initial_count == len(chunks):
         logger.info(f"Uploaded {len(chunks)} chunks from {document_path} to Weaviate.")
+        return True
     else:
         logger.error(f"Failed to upload {len(chunks)} chunks from {document_path} to Weaviate.")
+        return False
 
 
 async def main(document_path_list: list[str]):
@@ -157,27 +173,54 @@ async def main(document_path_list: list[str]):
 
     await create_weaviate_collection(weaviate_client=weaviate_client, collection_name=WEAVIATE_COLLECTION_NAME)
 
+    success_count = 0
+    failed_count = 0
+    failed_document_path_list = []
     for document_path in document_path_list:
-        await process_document(
+        success = await process_document(
             document_path=document_path, 
             weaviate_client=weaviate_client, 
             collection_name=WEAVIATE_COLLECTION_NAME
         )
-        print()
+        if success:
+            logger.info(f"Successfully processed {document_path}")
+            success_count += 1
+        else:
+            logger.error(f"Failed to process {document_path}")
+            failed_count += 1
+            failed_document_path_list.append(document_path)
+
+    logger.info(f"Successfully processed {success_count}/{len(document_path_list)} documents.")
+    logger.info(f"Failed to process {failed_count}/{len(document_path_list)} documents.")
+    logger.info(f"Failed document paths: {failed_document_path_list}")
 
 
-def get_files_from_dir(dir_path: str):
-    return [os.path.join(dir_path, file) for file in os.listdir(dir_path) if file.endswith(".pdf")]
+def get_files_from_dir(dir_path: str, file_type: str = "pdf"):
+    dir_companies = glob.glob(dir_path+"/*")
+
+    document_path_list = []
+    for company in dir_companies:
+        selected_files = [item for item in os.listdir(company) if item.endswith(f".{file_type}")]
+        for pdf_file in selected_files:
+            file_path = os.path.join(company, pdf_file)
+            document_path_list.append(file_path)
+    return document_path_list
 
 
 if __name__ == "__main__":
     # Pass your list of PDF file paths here
-    document_path_list = [
-        os.path.expanduser("~/Desktop/work_dir/68a58892b4058539485342/Dataset/AsiaAgroFood/aafdf5_2024_cons_rus.pdf"),
-    ]
+    # document_path_list = [
+    #     # os.path.expanduser("~/Desktop/work_dir/68a58892b4058539485342/Dataset/AsiaAgroFood/aafdf5_2024_cons_rus.pdf"),
+    #     # "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Rakhat/rahtp_2024_rus.pdf"
+    #     # "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/AsiaAgroFood/aafd_af_4_2025.pdf"
+    #     # "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/BRK/brkz_af_4_2025.pdf"
+    # ]
     
-    # dir_path = os.path.expanduser("~/Desktop/work_dir/AI-RAG-Challenge-2025/68a58892b4058539485342/Dataset") TODO: process all dirs
-    # pdf_files = get_files_from_dir(dir_path=dir_path)
+    data_dir = os.path.expanduser("~/Desktop/work_dir/68a58892b4058539485342/Dataset")
+    file_type = "pdf"
+    # file_type = "xlsx"
+
+    document_path_list = get_files_from_dir(dir_path=data_dir, file_type=file_type)
 
     asyncio.run(main(document_path_list))
 
