@@ -6,7 +6,8 @@ warnings.filterwarnings("ignore")
 
 import weaviate
 from weaviate.classes.init import Auth
-from weaviate.classes.query import MetadataQuery
+from weaviate.classes.query import MetadataQuery, Filter
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.nlp_tools import get_embeddings
@@ -65,7 +66,7 @@ class Retriever:
             return None
 
 
-    def hybrid_search(self, query_text: str, collection: weaviate.collections.collection.sync.Collection, top_k: int = 5) -> list[weaviate.collections.classes.internal.Object]:    
+    def hybrid_search(self, query_text: str, collection: weaviate.collections.collection.sync.Collection, top_k: int = 5, alpha: float = 0.5, filter_condition: Filter = None) -> list[weaviate.collections.classes.internal.Object]:    
         logger.info("Generating embedding for query...")
         query_vector = get_embeddings(
             text=query_text,
@@ -78,8 +79,9 @@ class Retriever:
         response = collection.query.hybrid(
             query=query_text,
             vector=query_vector_list,
-            alpha=0.5, # 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
+            alpha=alpha, # 0.0 = pure BM25, 1.0 = pure vector, 0.5 = balanced
             limit=top_k,
+            filters=filter_condition,
             return_metadata=MetadataQuery(score=True, explain_score=True)
         )
 
@@ -100,14 +102,26 @@ class Retriever:
 
     
 if __name__ == "__main__":
-    query_text = "9 npoyue Hanoru K ynnare?"
-
+    # query_text = "Какая дата рождения у Келин Александра?"
+    # query_text = "Кто главный бухгалтер в АО \"AsiaAgroFood\" (ФИО)?" # id=14
+    query_text = "Какая сумма в тенге налоговых убытков была у группы компаний АО «Матен Петролеум» на момент 31 декабря 2024 года?" # id=9
+    
+    
     retriever = Retriever()
 
     collection = retriever.get_collection(WEAVIATE_COLLECTION_NAME)
     if collection is None:
         logger.error(f"Collection {WEAVIATE_COLLECTION_NAME} not found")
 
-    weaviate_objects = retriever.hybrid_search(query_text, collection)
+    weaviate_objects = retriever.hybrid_search(query_text, collection, top_k=10, alpha=0.9)
+    
+    retriever_results = [(obj.properties["filename"], obj.properties["first_element_page_number"], obj.properties["content"]) for obj in weaviate_objects]
+    for i, (filename, page_number, content) in enumerate(retriever_results, 1):
+        print(f"Result {i}:")
+        print(f"  Filename: {filename}")
+        print(f"  Page number: {page_number}")
+        print(f"  Content: {content}")
+        print()
+
 
     retriever.close_client()
