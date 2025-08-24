@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.docs_parser import custom_tokenizer, chunker, apply_chunking
 from ocr.apply_chunking_custom_ocr import apply_chunking_custom_ocr
 from ocr.registry import get_ocr_module
-from utils.nlp_tools import get_embeddings
+from utils.nlp_tools import get_embeddings, get_embeddings_batch
 
 
 import logging
@@ -118,6 +118,14 @@ async def process_document(document_path: str, weaviate_client: weaviate.client.
     ### Step 2: Embedding and Indexing
     logger.info(f"Embedding {len(chunks)} chunks and uploading to Weaviate.")
     
+    # Process texts in smaller batches to avoid memory issues
+    # contextualized_texts = [chunker.contextualize(chunk=chunk) for chunk in chunks]
+    # chunks_embeddings = get_embeddings_batch(
+    #     texts=contextualized_texts,
+    #     embedding_model_path=EMBEDDING_MODEL_PATH,
+    #     batch_size=16  # Conservative batch size with internal chunking
+    # )
+
     # Get Weaviate collection
     weaviate_collection = weaviate_client.collections.get(collection_name)
     initial_count = weaviate_collection.aggregate.over_all(total_count=True).total_count
@@ -128,6 +136,7 @@ async def process_document(document_path: str, weaviate_client: weaviate.client.
 
             chunk_text_with_headings = chunker.contextualize(chunk=chunk)
 
+            # chunk_embedding = chunks_embeddings[idx]
             chunk_embedding = get_embeddings(
                 text=chunk_text_with_headings,
                 embedding_model_path=EMBEDDING_MODEL_PATH
@@ -176,12 +185,33 @@ async def main(document_path_list: list[str]):
     success_count = 0
     failed_count = 0
     failed_document_path_list = []
-    for document_path in document_path_list:
-        success = await process_document(
-            document_path=document_path, 
-            weaviate_client=weaviate_client, 
-            collection_name=WEAVIATE_COLLECTION_NAME
-        )
+    processed_files_list = [
+        "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Rakhat/raht_af_4_2025.pdf",
+        "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Faeton/fatn_af_4_2025.pdf",
+        "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Oasis Logistics/oasi_af_4_2025.pdf",
+        "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Teniz Capital/tcib_af_4_2025.pdf"
+    ]
+    failed_files_list = [
+        "/Users/nurbolatkenbayev/Desktop/work_dir/68a58892b4058539485342/Dataset/Bass Gold/fpst_af_4_2025.pdf"
+    ]
+    for i, document_path in enumerate(document_path_list):
+        logger.info(f"Processing {i+1}/{len(document_path_list)}: {document_path}")
+        if document_path in processed_files_list:
+            logger.info(f"Skipping {document_path} because it has already been processed.")
+            continue
+        if document_path in failed_files_list:
+            logger.info(f"Skipping {document_path} because it has already been failed.")
+            success = False
+        else:
+            try:
+                success = await process_document(
+                    document_path=document_path, 
+                        weaviate_client=weaviate_client, 
+                        collection_name=WEAVIATE_COLLECTION_NAME
+                    )
+            except Exception as e:
+                logger.info(f"Failed to process {document_path}: {e}")
+                success = False
         if success:
             logger.info(f"Successfully processed {document_path}")
             success_count += 1
@@ -189,6 +219,7 @@ async def main(document_path_list: list[str]):
             logger.error(f"Failed to process {document_path}")
             failed_count += 1
             failed_document_path_list.append(document_path)
+        logger.info(f"Processed {i+1}/{len(document_path_list)}: {document_path}")
 
     logger.info(f"Successfully processed {success_count}/{len(document_path_list)} documents.")
     logger.info(f"Failed to process {failed_count}/{len(document_path_list)} documents.")
@@ -196,14 +227,40 @@ async def main(document_path_list: list[str]):
 
 
 def get_files_from_dir(dir_path: str, file_type: str = "pdf"):
+    import PyPDF2
+    
+    def get_pdf_page_count(pdf_path):
+        """Get the number of pages in a PDF file."""
+        try:
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                return len(pdf_reader.pages)
+        except Exception as e:
+            logger.warning(f"Could not get page count for {pdf_path}: {e}")
+            return float('inf')  # Put problematic files at the end
+    
     dir_companies = glob.glob(dir_path+"/*")
 
     document_path_list = []
+    processed_companies = ["AsiaAgroFood", "Maten Petroleum", "Bayan Sulu", "Air Astana", "KazTelecom", "Transtelecom" , "BRK"]
+    # processed_companies = []
     for company in dir_companies:
+        if os.path.basename(company) in processed_companies:
+            logger.info(f"Skipping {company} because it has already been processed.")
+            continue
         selected_files = [item for item in os.listdir(company) if item.endswith(f".{file_type}")]
         for pdf_file in selected_files:
             file_path = os.path.join(company, pdf_file)
             document_path_list.append(file_path)
+    
+    # Sort files by page count (smallest first)
+    if file_type == "pdf":
+        logger.info("Sorting PDF files by page count...")
+        document_path_list.sort(key=get_pdf_page_count)
+    else:
+        # For non-PDF files, sort by file size as fallback
+        document_path_list.sort(key=lambda x: os.path.getsize(x))
+    
     return document_path_list
 
 
